@@ -1,0 +1,215 @@
+import { loginFailureHintOf } from '../../protocol/loginHints.js';
+import { exposedUpstreamErrorKeyOf, isExposedUpstreamErrorKey, } from '../../protocol/upstreamErrorKeys.js';
+import { dictionaryOf } from '../../util/values.js';
+import { QqDeviceBootstrapError, QqProtocolError } from './musicuProtocol.js';
+import { PtloginError } from './ptlogin.js';
+import { WechatQrError } from './wechatLogin.js';
+// src/services/auth/qrFailures.ts
+// 从认证入口搬出的同一套实现；协议、状态与对外回包沿用原规则。
+export const terminalState = (state) => ['confirmed', 'expired', 'failed'].includes(state);
+/**
+ * States where the user is already acting on this QR from their phone. A second login attempt must
+ * not pull the rug out from under that, so these keep the 409; every other non-terminal state is an
+ * abandoned code and is preemptible. `confirmed` is deliberately absent: it is terminal, it never
+ * blocked a new session, and blocking it would 409 anyone who signs out and back in inside the TTL.
+ */
+export const confirmingState = (state) => ['scanned', 'exchanging'].includes(state);
+/** Keeps whatever opaque number the upstream gave us, whichever channel produced the failure. */
+export const upstreamCodeOf = (error) => {
+    if (error instanceof QqProtocolError)
+        return error.upstreamCode;
+    if (error instanceof WechatQrError)
+        return error.upstreamCode;
+    if (error instanceof PtloginError)
+        return error.upstreamCode;
+    return undefined;
+};
+/** Which registered call each login step (`QqProtocolError.phase`) is, per channel. */
+const LOGIN_UPSTREAM_OPERATIONS = {
+    qq: {
+        'credential-exchange': 'login.qq.credential-exchange',
+        'get-login-user': 'login.qq.fallback-validation',
+    },
+    // 同一支换凭证与回退读取，码表沿用手机 QQ 的登记。
+    qqmusic: {
+        'credential-exchange': 'login.qq.credential-exchange',
+        'get-login-user': 'login.qq.fallback-validation',
+    },
+    wechat: {
+        'credential-exchange': 'login.wechat.credential-exchange',
+        'get-login-user': 'login.wechat.credential-validation',
+        'credential-refresh': 'login.wechat.credential-refresh',
+    },
+};
+/**
+ * A login failure's optional key. An HTTP failure or a non-zero gateway code takes precedence, so
+ * only a business code from an otherwise healthy response counts, and then only when channel, step
+ * and number all match a registered entry with a source.
+ */
+export const loginUpstreamErrorKeyOf = (error, channel) => {
+    // 网页登录换凭证（只有手机 QQ 通道会走）：HTTP 正常、外层码是 0 时才看单项码。
+    if (error instanceof PtloginError) {
+        if (channel !== 'qq' || error.step !== 'qq-login' || error.upstreamCode === undefined)
+            return undefined;
+        const status = error.httpStatus;
+        if ((status !== undefined && (status < 200 || status > 299)) || error.globalCode !== 0)
+            return undefined;
+        return exposedUpstreamErrorKeyOf('login.qq.ptlogin-exchange', 'business', error.upstreamCode);
+    }
+    if (!channel || !(error instanceof QqProtocolError) || error.upstreamCode === undefined)
+        return undefined;
+    if (error.httpStatus < 200 || error.httpStatus > 299 || error.globalCode !== 0)
+        return undefined;
+    const operations = LOGIN_UPSTREAM_OPERATIONS[channel];
+    const operation = Object.hasOwn(operations, error.phase) ? operations[error.phase] : undefined;
+    return operation
+        ? exposedUpstreamErrorKeyOf(operation, 'business', error.upstreamCode)
+        : undefined;
+};
+/** Only stable, non-sensitive error categories cross the API boundary. */
+export const qrFailureReasonOf = (error) => {
+    const status = upstreamHttpStatusOf(error);
+    if (status !== undefined && status >= 400)
+        return 'upstream-http-error';
+    if (error instanceof QqProtocolError ||
+        error instanceof WechatQrError ||
+        error instanceof PtloginError ||
+        error instanceof QqDeviceBootstrapError)
+        return 'upstream-rejected';
+    const message = error instanceof Error ? error.message : '';
+    const knownMessages = {
+        'MQTT WebSocket error': 'mqtt-websocket-error',
+        'MQTT WebSocket closed': 'mqtt-websocket-closed',
+        'MQTT packet timeout': 'mqtt-packet-timeout',
+        'MQTT handshake timeout': 'mqtt-handshake-timeout',
+        'MQTT handshake failed': 'mqtt-handshake-failed',
+        'MQTT cookies missing login credential': 'missing-credential',
+    };
+    if (Object.hasOwn(knownMessages, message))
+        return knownMessages[message];
+    const record = dictionaryOf(error);
+    const code = record.code ?? dictionaryOf(record.cause).code;
+    if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name))
+        return 'network-timeout';
+    if (code === 'ETIMEDOUT' || code === 'ECONNABORTED')
+        return 'network-timeout';
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN')
+        return 'dns-error';
+    if (code === 'ECONNRESET')
+        return 'connection-reset';
+    if (code === 'ECONNREFUSED')
+        return 'connection-refused';
+    if (code === 'ERR_NETWORK')
+        return 'network-error';
+    return 'unexpected-error';
+};
+export const safeDiagnosticNumber = (value) => typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined;
+export const upstreamHttpStatusOf = (error) => {
+    const record = dictionaryOf(error);
+    const status = safeDiagnosticNumber(record.httpStatus ?? dictionaryOf(record.response).status);
+    return status !== undefined && status >= 100 && status <= 599 ? status : undefined;
+};
+export const QR_FAILURE_STAGES = new Set([
+    'qr-key',
+    'device-bootstrap',
+    'session-bootstrap',
+    'qr-create',
+    'mqtt-listener',
+    'qr-poll',
+    'qr-event',
+    'credential-payload',
+    'credential-exchange',
+    'credential-validation',
+    'session-issue',
+]);
+export const QR_FAILURE_REASONS = new Set([
+    'local-backoff',
+    'session-busy',
+    'upstream-http-error',
+    'upstream-rejected',
+    'mqtt-websocket-error',
+    'mqtt-websocket-closed',
+    'mqtt-packet-timeout',
+    'mqtt-handshake-timeout',
+    'mqtt-handshake-failed',
+    'missing-credential',
+    'network-timeout',
+    'dns-error',
+    'connection-reset',
+    'connection-refused',
+    'network-error',
+    'login-rejected',
+    'user-canceled',
+    'qr-timeout',
+    'unexpected-error',
+]);
+const knownStage = (value) => typeof value === 'string' && QR_FAILURE_STAGES.has(value) ? value : undefined;
+const knownReason = (value) => typeof value === 'string' && QR_FAILURE_REASONS.has(value)
+    ? value
+    : undefined;
+/** Keeps only the validated fields; a record with none of them left is dropped entirely. */
+const primaryFailureFieldsOf = (source) => {
+    const record = dictionaryOf(source);
+    const fields = {
+        failureStage: knownStage(record.failureStage),
+        failureReason: knownReason(record.failureReason),
+        upstreamCode: safeDiagnosticNumber(record.upstreamCode),
+        upstreamErrorKey: isExposedUpstreamErrorKey(record.upstreamErrorKey)
+            ? record.upstreamErrorKey
+            : undefined,
+    };
+    return Object.values(fields).some((value) => value !== undefined) ? fields : undefined;
+};
+/** Restored records are untrusted. Select and validate only public diagnostic fields. */
+export const failureDetailsOf = (source) => {
+    const details = {
+        failureStage: knownStage(source.failureStage),
+        failureReason: knownReason(source.failureReason),
+        upstreamHttpStatus: upstreamHttpStatusOf({ httpStatus: source.upstreamHttpStatus }),
+        upstreamCode: safeDiagnosticNumber(source.upstreamCode),
+        upstreamGlobalCode: safeDiagnosticNumber(source.upstreamGlobalCode),
+        upstreamSubCode: safeDiagnosticNumber(source.upstreamSubCode),
+    };
+    // The newer fields are added only when present, so a failure without them keeps exactly the
+    // keys it always had.
+    if (isExposedUpstreamErrorKey(source.upstreamErrorKey))
+        details.upstreamErrorKey = source.upstreamErrorKey;
+    const primaryFailure = primaryFailureFieldsOf(source.primaryFailure);
+    if (primaryFailure)
+        details.primaryFailure = primaryFailure;
+    if (source.fallbackAttempted === true)
+        details.fallbackAttempted = true;
+    // Always derived from the validated fields, never copied from a restored record.
+    const failureHint = loginFailureHintOf(details);
+    if (failureHint)
+        details.failureHint = failureHint;
+    return details;
+};
+export const qrFailureDetailsOf = (error, stage, channel) => {
+    const details = {
+        failureStage: stage,
+        failureReason: qrFailureReasonOf(error),
+        upstreamHttpStatus: upstreamHttpStatusOf(error),
+        upstreamCode: safeDiagnosticNumber(error instanceof QqDeviceBootstrapError ? error.outerCode : upstreamCodeOf(error)),
+        upstreamGlobalCode: error instanceof QqProtocolError || error instanceof PtloginError
+            ? safeDiagnosticNumber(error.globalCode)
+            : undefined,
+        upstreamSubCode: error instanceof QqDeviceBootstrapError ? safeDiagnosticNumber(error.innerCode) : undefined,
+    };
+    const upstreamErrorKey = loginUpstreamErrorKeyOf(error, channel);
+    if (upstreamErrorKey)
+        details.upstreamErrorKey = upstreamErrorKey;
+    return details;
+};
+/** What a primary step failed with, in the shape `primaryFailure` carries. */
+export const primaryFailureOf = (error, stage, channel) => {
+    const failure = {
+        failureStage: stage,
+        failureReason: qrFailureReasonOf(error),
+        upstreamCode: safeDiagnosticNumber(upstreamCodeOf(error)),
+    };
+    const upstreamErrorKey = loginUpstreamErrorKeyOf(error, channel);
+    if (upstreamErrorKey)
+        failure.upstreamErrorKey = upstreamErrorKey;
+    return failure;
+};

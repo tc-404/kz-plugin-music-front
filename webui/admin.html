@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音乐服务前置</title>
+<!--
+  扩展插件后台。宿主注入 window.__KAKAKE_PLUGIN_ID__。
+  管理接口：/api/Plugin/ext/<插件ID>/...（需登录）
+  数据接口：/plugin/<插件ID>/api/...（免登录，供其他插件/用户访问）
+-->
+<style>
+:root{
+  color-scheme:light;
+  --bg:#e9efe7;
+  --ink:#1b261e;
+  --muted:#6d7b70;
+  --line:rgba(30,66,42,.10);
+  --line-strong:rgba(30,66,42,.16);
+  --glass:rgba(255,255,255,.64);
+  --glass-2:rgba(255,255,255,.44);
+  --glass-strong:rgba(255,255,255,.86);
+  --brand:#159410;
+  --brand-2:#2ceb13;
+  --brand-soft:#e9f7e4;
+  --danger:#bd4038;
+  --r:16px;
+  --shadow:0 6px 22px rgba(23,58,36,.075),0 1px 3px rgba(23,58,36,.05);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;color:var(--ink);
+  font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);overflow:hidden;
+}
+body::before,body::after{
+  content:"";position:fixed;z-index:-1;border-radius:50%;filter:blur(90px);pointer-events:none;
+}
+body::before{width:560px;height:560px;left:-180px;top:-220px;background:rgba(146,222,72,.30)}
+body::after{width:620px;height:620px;right:-220px;bottom:-300px;background:rgba(88,205,168,.22)}
+
+.app{display:flex;gap:14px;height:100vh;padding:14px}
+
+/* ── 侧边栏 ── */
+.sidebar{
+  width:214px;flex:none;display:flex;flex-direction:column;padding:16px 12px 12px;
+  border:1px solid rgba(255,255,255,.72);border-radius:18px;
+  background:linear-gradient(158deg,rgba(255,255,255,.80),rgba(255,255,255,.44) 52%,rgba(255,255,255,.34));
+  -webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);
+  box-shadow:var(--shadow);
+  transition:width .22s cubic-bezier(.22,1,.36,1),padding .22s cubic-bezier(.22,1,.36,1);
+}
+.brand{padding:2px 8px 16px}
+.brand-txt strong{display:block;font-size:13px;letter-spacing:.01em}
+.brand-txt span{display:block;font-size:9px;letter-spacing:.13em;color:#8a998d;margin-top:1px}
+.nav{display:flex;flex-direction:column;gap:3px;flex:1;min-height:0;overflow:auto}
+.nav-label{font-size:10px;color:#93a094;letter-spacing:.08em;padding:12px 10px 5px}
+.nav-item{
+  position:relative;display:flex;align-items:center;gap:9px;width:100%;
+  padding:9px 10px;border:0;border-radius:10px;background:transparent;
+  color:#4b5b50;font:inherit;font-size:12.5px;text-align:left;cursor:pointer;
+  transition:background .18s,color .18s;
+}
+.nav-item:hover{background:rgba(255,255,255,.7);color:#26372b}
+.nav-item.on{
+  background:linear-gradient(90deg,rgba(44,235,19,.15),rgba(44,235,19,.045));
+  color:#0f7c0c;font-weight:600;
+}
+.nav-item.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--brand)}
+.nav-item svg{flex:none;opacity:.85}
+.nav-item .badge{
+  margin-left:auto;min-width:18px;padding:0 5px;height:17px;line-height:17px;text-align:center;
+  border-radius:5px;background:rgba(30,66,42,.08);color:#66766a;font-size:10px;font-variant-numeric:tabular-nums;
+}
+.nav-item.on .badge{background:rgba(21,148,16,.13);color:#137c0e}
+/* 折叠态：只留导航图标，由顶栏三条杠切换 */
+body.side-collapsed .sidebar{width:62px;padding:16px 8px 10px}
+body.side-collapsed .brand{display:none}
+body.side-collapsed .nav-label,
+body.side-collapsed .nav-item span:not(.badge),
+body.side-collapsed .nav-item .badge{display:none}
+body.side-collapsed .nav-item{justify-content:center;padding:11px 0}
+.scrim{display:none}
+
+/* ── 主区 ── */
+.main{
+  flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;
+  border:1px solid rgba(255,255,255,.72);border-radius:18px;
+  background:var(--glass);-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);
+  box-shadow:var(--shadow);
+}
+.topbar{
+  display:flex;align-items:center;gap:12px;padding:14px 20px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.30);
+}
+.topbar h1{margin:0;font-size:14px;font-weight:650;letter-spacing:.01em}
+.icon-btn{
+  width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--line-strong);
+  border-radius:8px;background:rgba(255,255,255,.6);color:#5d6d61;cursor:pointer;font-size:14px;
+}
+.icon-btn:hover{background:#fff;color:var(--brand)}
+.content{flex:1;min-height:0;overflow:auto;padding:18px 20px 28px}
+.view{display:none;max-width:1040px;margin:0 auto}
+.view.on{display:block}
+
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin:2px 0 16px}
+.page-head h2{margin:0 0 3px;font-size:17px;font-weight:650;letter-spacing:.01em}
+.page-head p{margin:0;color:var(--muted);font-size:11.5px}
+.pill{
+  flex:none;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;
+  border:1px solid var(--line-strong);border-radius:8px;background:rgba(255,255,255,.62);
+  color:#68776c;font-size:11px;
+}
+.pill i{width:7px;height:7px;border-radius:50%;background:#b7c1b8}
+.pill.on i{background:#22b64b;box-shadow:0 0 0 3px rgba(34,182,75,.14)}
+
+.panel{
+  margin-bottom:14px;padding:16px 18px;border-radius:var(--r);
+  background:var(--glass-2);border:1px solid rgba(255,255,255,.78);
+  box-shadow:0 3px 14px rgba(23,58,36,.045);
+}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.panel-head h3{margin:0;font-size:13px;font-weight:650}
+.hint{color:#93a096;font-size:11px}
+.builtin-note{display:flex;align-items:center;gap:8px;padding:8px 11px;margin-bottom:12px;border-radius:10px;background:rgba(124,196,72,.08);border:1px solid rgba(124,196,72,.22);color:#4e6b3c;font-size:11.5px;line-height:1.5}
+.builtin-note i{width:7px;height:7px;border-radius:50%;background:#8b9a8c;flex:none}
+.builtin-note.ready{background:rgba(34,182,75,.08);border-color:rgba(34,182,75,.24);color:#2f7a45}
+.builtin-note.ready i{background:#22b64b}
+.builtin-note.off{background:rgba(150,160,152,.08);border-color:rgba(150,160,152,.2);color:#7c8880}
+.field-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.field-row label{font-size:11.5px;color:#637165;flex:none}
+input,select{
+  height:34px;padding:0 10px;border:1px solid var(--line-strong);border-radius:8px;
+  background:rgba(255,255,255,.82);color:var(--ink);font:inherit;font-size:12px;outline:none;min-width:0;
+}
+input:focus,select:focus{border-color:rgba(21,148,16,.55);box-shadow:0 0 0 3px rgba(44,235,19,.11)}
+input::placeholder{color:#a8b3a9}
+.grow{flex:1;min-width:140px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+
+.btn{
+  height:34px;padding:0 13px;border:1px solid var(--line-strong);border-radius:8px;
+  background:rgba(255,255,255,.85);color:#415046;font:inherit;font-size:12px;font-weight:550;
+  cursor:pointer;white-space:nowrap;transition:background .16s,border-color .16s,transform .12s;
+}
+.btn:hover{background:#fff;border-color:rgba(21,148,16,.32)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:linear-gradient(135deg,#1aa312,#0f8d0c);border-color:transparent;color:#fff;box-shadow:0 2px 8px rgba(21,148,16,.22)}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.sm{height:28px;padding:0 10px;font-size:11px;border-radius:7px}
+.btn.danger{color:var(--danger)}
+.btn.danger:hover{border-color:rgba(189,64,56,.4);background:#fff7f6}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+
+.msg{font-size:11.5px;min-height:17px;margin-top:8px;color:var(--danger)}
+.msg.ok{color:#11833a}
+.hide{display:none!important}
+
+/* 账号卡片 */
+.accounts{display:flex;flex-direction:column;gap:9px;margin-top:10px}
+.acc{
+  padding:12px 14px;border:1px solid var(--line);border-radius:12px;
+  background:rgba(255,255,255,.66);transition:border-color .16s,background .16s;
+}
+.acc:hover{border-color:rgba(21,148,16,.24);background:rgba(255,255,255,.82)}
+.acc.off{opacity:.62}
+.acc-top{display:flex;align-items:center;gap:9px}
+.acc-avatar{width:30px;height:30px;flex:none;border-radius:50%;object-fit:cover;border:1px solid var(--line-strong);background:rgba(255,255,255,.7)}
+.acc-name{font-size:12.5px;font-weight:600;line-height:1.35;min-width:0}
+.acc-name .acc-nick{color:#7c8a7f;font-weight:500}
+.acc-name .acc-dash{color:#b3bdb4;font-weight:400;margin:0 4px}
+.tag{padding:1px 6px;border-radius:5px;background:var(--brand-soft);color:#127b0d;font-size:10px;font-weight:600}
+.tag.pri{background:#fff2d6;color:#a86b00}
+.state{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:#8b978c;font-size:10.5px}
+.state::before{content:"";width:6px;height:6px;border-radius:50%;background:#bcc5bd}
+.state.on{color:#17833c}
+.state.on::before{background:#22b64b}
+.acc-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:#7c8a7f;font-size:11px}
+.acc-meta .vip{color:#a86b00;background:#fff2d6;border-radius:4px;padding:0 5px}
+.acc-foot{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.acc-foot .time{color:#a0aaa1;font-size:10.5px;margin-right:auto}
+.acts{display:flex;gap:5px;flex-wrap:wrap}
+.link{
+  border:0;background:transparent;color:#47705a;font:inherit;font-size:11px;
+  padding:3px 6px;border-radius:5px;cursor:pointer;
+}
+.link:hover{background:rgba(21,148,16,.09);color:#0f7c0c}
+.link.danger{color:#b0524b}
+.link.danger:hover{background:#fdf0ef;color:#9d3831}
+.probe{margin-top:9px;padding:8px 10px;border-radius:8px;background:rgba(21,148,16,.055);color:#4c6655;font-size:11px}
+.empty{padding:22px;text-align:center;border:1px dashed var(--line-strong);border-radius:11px;color:#96a299;font-size:11.5px}
+.inline-edit{display:flex;gap:6px;margin-top:8px;align-items:center}
+.inline-edit input{height:29px;flex:1}
+
+/* 扫码 / 手动添加面板 */
+.subpanel{margin:4px 0 12px;padding:14px;border:1px solid rgba(21,148,16,.16);border-radius:12px;background:rgba(233,247,228,.5)}
+.subpanel h4{margin:0 0 10px;font-size:12px;font-weight:650;color:#2c4934}
+.subpanel .fields{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+.subpanel .fields label{font-size:11px;color:#617062;display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px}
+.subpanel .fields label input,.subpanel .fields label select{width:100%}
+.qr-result{display:flex;justify-content:center;margin-top:10px}
+.qr-result img{width:154px;height:154px;padding:5px;background:#fff;border:1px solid var(--line-strong);border-radius:10px}
+.qr-txt{max-width:100%;font-size:10.5px;color:#718074;word-break:break-all}
+
+/* 搜索测试 */
+.result-list{display:flex;flex-direction:column;gap:5px;margin-top:10px}
+.song{
+  display:flex;align-items:center;gap:11px;padding:8px 11px;border:1px solid var(--line);
+  border-radius:9px;background:rgba(255,255,255,.66);cursor:pointer;transition:.15s;
+}
+.song:hover{border-color:rgba(21,148,16,.36);background:rgba(255,255,255,.92)}
+.song .seq{width:22px;text-align:right;color:#9ba79d;font-size:11px;font-variant-numeric:tabular-nums}
+.song .info{flex:1;min-width:0}
+.song .t{font-size:12px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.song .s{font-size:10.5px;color:#8b978d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.song .d{font-size:10.5px;color:#a1aba3;font-variant-numeric:tabular-nums}
+.pick-box{margin-top:11px;padding:12px 14px;border:1px solid rgba(21,148,16,.2);border-radius:11px;background:rgba(233,247,228,.55);font-size:11.5px}
+.pick-box .row2{display:flex;gap:14px;color:#5f7064;margin:3px 0}
+.pick-box a{color:#10800d;word-break:break-all;text-decoration:none}
+.pick-box a:hover{text-decoration:underline}
+
+/* 选中歌曲状态：黄=获取中 / 绿=成功 / 红=失败 */
+.song.sel-pending{border-color:#d9a400;background:rgba(255,249,220,.75);box-shadow:0 0 0 1px rgba(217,164,0,.22)}
+.song.sel-ok{border-color:#159410;background:rgba(233,247,228,.8);box-shadow:0 0 0 1px rgba(21,148,16,.2)}
+.song.sel-fail{border-color:#d64545;background:rgba(255,238,238,.75);box-shadow:0 0 0 1px rgba(214,69,69,.2)}
+.song.sel-pending .seq{color:#a87900;font-weight:700}
+.song.sel-ok .seq{color:#137c0e;font-weight:700}
+.song.sel-fail .seq{color:#c43c3c;font-weight:700}
+.song .state{font-size:10px;padding:1px 6px;border-radius:9px;white-space:nowrap}
+.song.sel-pending .state:after{content:'获取中';background:#fff3cd;color:#8a6500}
+.song.sel-ok .state:after{content:'成功';background:#e3f4df;color:#137c0e}
+.song.sel-fail .state:after{content:'失败';background:#fde5e5;color:#b93535}
+
+/* 音频播放器 */
+.player{margin-top:10px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.8)}
+.player .p-name{font-size:11px;color:#5f7064;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.player .p-main{display:flex;align-items:center;gap:9px}
+.p-btn{width:32px;height:32px;flex:none;border:0;border-radius:50%;background:var(--brand);color:#fff;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.p-btn:hover{background:#117a0d}
+.p-btn:disabled{opacity:.5;cursor:not-allowed}
+.p-time{font-size:10.5px;color:#7f8d82;font-variant-numeric:tabular-nums;min-width:58px;text-align:center}
+/* 自定义进度条：thumb 中心按百分比精确对齐轨道两端，0% 贴左、100% 贴右 */
+.p-seek{flex:1;min-width:0;position:relative;height:18px;display:flex;align-items:center;cursor:pointer;touch-action:none;outline:none}
+.p-seek-track{position:relative;width:100%;height:5px;border-radius:3px;background:#dfe7e0}
+.p-seek-buf{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:#c6ddc7;pointer-events:none}
+.p-seek-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:var(--brand);pointer-events:none}
+.p-seek-thumb{position:absolute;left:0;top:50%;width:12px;height:12px;border-radius:50%;background:var(--brand);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transform:translate(-50%,-50%);pointer-events:none;transition:transform .12s}
+.p-seek:hover .p-seek-thumb,.p-seek.dragging .p-seek-thumb,.p-seek:focus-visible .p-seek-thumb{transform:translate(-50%,-50%) scale(1.18)}
+.p-seek-tip{position:absolute;top:-23px;left:0;transform:translateX(-50%);padding:2px 6px;border-radius:4px;background:#2e4c39;color:#fff;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s;z-index:2}
+.p-seek:hover .p-seek-tip,.p-seek.dragging .p-seek-tip{opacity:1}
+.p-vol{display:flex;align-items:center;gap:4px;color:#7f8d82;flex:none}
+.p-vol input{width:52px;height:3px;accent-color:var(--brand)}
+.p-err{font-size:10.5px;color:#c43c3c;margin-top:7px}
+.p-audio{display:none}
+
+/* 接口文档 */
+.doc-lead{color:#6b796e;font-size:11.5px;margin:0 0 12px}
+.ep{padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.62);margin-bottom:8px}
+.ep-top{display:flex;align-items:center;gap:8px}
+.method{padding:2px 7px;border-radius:5px;background:var(--brand-soft);color:#10800d;font-size:10px;font-weight:700;letter-spacing:.04em}
+.ep code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#2e4c39;word-break:break-all;flex:1}
+.ep-name{margin-top:7px;font-size:12.5px;font-weight:600;color:#2b3c2e}
+.ep p{margin:5px 0 0;color:#7d8b80;font-size:11px}
+
+/* 访问控制 */
+.ac-row{padding:10px 0;border-top:1px solid var(--line)}
+.ac-row:first-of-type{border-top:0}
+.ac-row>label{display:block;font-size:11.5px;color:#4d5d51;margin-bottom:6px;font-weight:600}
+.ac-row .input{max-width:340px}
+.ac-wl.is-off{opacity:.5;pointer-events:none}
+.wl-box{display:flex;flex-wrap:wrap;gap:6px;min-height:30px;padding:6px;border:1px solid var(--line-strong);border-radius:8px;background:rgba(255,255,255,.55)}
+.wl-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 6px 4px 9px;border-radius:20px;background:var(--brand-soft);color:#136a0e;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
+.wl-chip button{border:0;background:rgba(0,0,0,.07);color:#2e5a30;width:15px;height:15px;line-height:1;border-radius:50%;cursor:pointer;padding:0;font-size:11px;display:grid;place-items:center}
+.wl-chip button:hover{background:rgba(0,0,0,.16)}
+.wl-empty{color:#9aa69d;font-size:11.5px;align-self:center}
+.wl-add{display:flex;gap:7px;margin-top:8px;max-width:340px}
+.wl-add .input{flex:1;min-width:0;max-width:none}
+.ac-foot{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.ac-foot .msg{margin-right:auto}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:rgba(40,80,52,.16);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(40,80,52,.28);background-clip:padding-box}
+/* ─────────── 手机端独立排版（不是桌面版缩放） ─────────── */
+@media (max-width:760px){
+  html,body{height:100%;overflow:hidden}
+  body{font-size:14px;-webkit-text-size-adjust:100%}
+  .app{display:block;height:100dvh;padding:0}
+  .main{height:100dvh;border:0;border-radius:0;background:rgba(244,249,242,.86)}
+
+  /* 抽屉式侧栏 */
+  .sidebar{
+    position:fixed;left:0;top:0;bottom:0;z-index:60;width:min(78vw,286px);height:100dvh;
+    padding:18px 14px calc(14px + env(safe-area-inset-bottom));border-radius:0 18px 18px 0;
+    transform:translateX(-104%);transition:transform .24s cubic-bezier(.22,1,.36,1);
+    background:linear-gradient(160deg,rgba(255,255,255,.96),rgba(255,255,255,.88));
+    box-shadow:8px 0 30px rgba(23,58,36,.16);
+  }
+  body.nav-open .sidebar{transform:translateX(0)}
+  .brand{padding-bottom:18px}
+  .brand-txt strong{font-size:14px}
+  .nav-item{padding:12px 12px;font-size:13.5px}
+  .nav-item .badge{height:20px;line-height:20px;font-size:11px}
+  .scrim{
+    display:block;position:fixed;inset:0;z-index:55;background:rgba(16,42,26,.34);
+    -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+    opacity:0;pointer-events:none;transition:opacity .2s;
+  }
+  body.nav-open .scrim{opacity:1;pointer-events:auto}
+
+  /* 顶栏 */
+  .topbar{gap:9px;padding:10px 14px;background:rgba(255,255,255,.72);min-height:56px}
+  .topbar h1{font-size:15px}
+  .menu-btn{display:grid;width:38px;height:38px;flex:none;font-size:17px}
+  .icon-btn{width:38px;height:38px}
+  .content{padding:14px 12px calc(26px + env(safe-area-inset-bottom))}
+
+  /* 页面头 / 卡片 */
+  .page-head{flex-direction:column;align-items:stretch;gap:8px;margin:0 0 13px}
+  .page-head h2{font-size:18px}
+  .page-head p{font-size:12px;line-height:1.5}
+  .pill{align-self:flex-start}
+  .panel{padding:14px;margin-bottom:12px;border-radius:14px}
+  .panel-head{align-items:flex-start;flex-direction:column;gap:3px;margin-bottom:11px}
+  .panel-head h3{font-size:14px}
+  .hint{font-size:11.5px;line-height:1.45}
+
+  /* 表单：单列、大触控目标 */
+  .field-row{flex-direction:column;align-items:stretch;gap:8px}
+  .field-row label{font-size:12px}
+  input,select{width:100%;height:44px;font-size:15px;border-radius:10px;padding:0 12px}
+  .grow{min-width:0;width:100%}
+  .btn{width:100%;height:44px;font-size:14px;border-radius:10px}
+  .btn.sm{width:auto;height:36px;font-size:12.5px;padding:0 12px}
+  .toolbar{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .msg{font-size:12px;min-height:19px}
+
+  /* 扫码 / 手动添加 */
+  .subpanel{padding:13px;margin-top:8px;border-radius:12px}
+  .subpanel h4{font-size:13px}
+  .subpanel .fields{flex-direction:column;gap:10px}
+  .subpanel .fields label{min-width:0;font-size:12px}
+  .subpanel .fields label input,.subpanel .fields label select{height:44px;font-size:15px}
+  .qr-result img{width:min(70vw,232px);height:auto;aspect-ratio:1;object-fit:contain}
+  .qr-txt{font-size:11.5px}
+
+  /* 账号卡片 */
+  .acc{padding:13px;border-radius:12px}
+  .acc-name{font-size:13.5px}
+  .state{font-size:11.5px}
+  .acc-meta{gap:6px 12px;font-size:11.5px}
+  .acc-foot{flex-direction:column;align-items:stretch;gap:9px}
+  .acc-foot .time{margin-right:0;font-size:11px}
+  .acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+  .link{
+    padding:9px 2px;text-align:center;font-size:12px;
+    border:1px solid var(--line-strong);background:rgba(255,255,255,.72);
+  }
+  .inline-edit{flex-wrap:wrap}
+  .inline-edit input{width:100%;flex:1 1 100%;height:44px}
+  .inline-edit .btn{flex:1}
+
+  /* 搜索测试 */
+  .song{padding:11px 10px;gap:9px}
+  .song .seq{width:26px;font-size:12px}
+  .song .t{font-size:13px}
+  .song .s{font-size:11.5px}
+  .pick-box{padding:13px;font-size:12.5px}
+  .pick-box .row2{flex-direction:column;gap:3px}
+  .p-btn{width:38px;height:38px;font-size:14px}
+  .p-seek-track{height:6px}
+  .p-seek-thumb{width:15px;height:15px}
+  .p-vol input{width:64px}
+  .song .state{font-size:11px}
+
+  /* 接口文档 */
+  .doc-lead{font-size:12px}
+  .ep{padding:12px}
+  .ep-top{flex-wrap:wrap;gap:7px}
+  .ep-top code{flex:1 1 100%;order:3;font-size:11.5px;line-height:1.6}
+  .ep-top .btn{margin-left:auto}
+  .ep p{font-size:12px;line-height:1.6}
+}
+
+/* 折叠态与手机抽屉互斥：手机端永远展示完整菜单文字 */
+@media (max-width:760px){
+  body.side-collapsed .sidebar{width:min(78vw,286px);padding:18px 14px calc(14px + env(safe-area-inset-bottom))}
+  body.side-collapsed .brand{display:block;padding:2px 8px 18px}
+  body.side-collapsed .brand-txt,
+  body.side-collapsed .nav-label,
+  body.side-collapsed .nav-item span:not(.badge),
+  body.side-collapsed .nav-item .badge{display:revert}
+  body.side-collapsed .nav-item{justify-content:flex-start;padding:12px}
+  body.side-collapsed .nav-item .badge{display:inline-block}
+}
+
+/* 中等宽度：桌面侧栏自动收窄 */
+@media (min-width:761px) and (max-width:1000px){
+  .sidebar:not(.x){width:184px}
+  body.side-collapsed .sidebar{width:62px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-txt"><strong>音乐服务前置</strong><span>MUSIC GATEWAY</span></div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-label">音源管理</div>
+      <button class="nav-item on" data-view="qq">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 14.5c2.6 1.5 5.4 1.5 8 0"/></svg>
+        <span>QQ音乐</span><span class="badge" data-badge="qq">0</span>
+      </button>
+      <button class="nav-item" data-view="netease">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9v6m4-9v12m4-15v18m4-14v10m4-7v4"/></svg>
+        <span>网易云音乐</span><span class="badge" data-badge="netease">0</span>
+      </button>
+      <button class="nav-item" data-view="kugou">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 16V8l7-4 7 4v8l-7 4-7-4Z"/><path d="M9 12h6"/></svg>
+        <span>酷狗音乐</span><span class="badge" data-badge="kugou">0</span>
+      </button>
+      <div class="nav-label">工具</div>
+      <button class="nav-item" data-view="tools">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+        <span>搜索</span>
+      </button>
+      <button class="nav-item" data-view="docs">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7"/></svg>
+        <span>文档</span>
+      </button>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <button class="icon-btn menu-btn" id="menu" title="折叠 / 展开侧边栏" aria-label="折叠或展开侧边栏">☰</button>
+      <h1 id="crumb">QQ音乐</h1>
+    </div>
+    <div class="content">
+      <div id="platform-views"></div>
+
+      <section class="view" data-view="tools">
+        <div class="page-head">
+          <div><h2>搜索</h2><p>在线验证「搜索列表 → 序号取直链」链路，并直接试听结果</p></div>
+          <span class="pill" id="tools-pill"><i></i><span>就绪</span></span>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>搜索测试</h3><span class="hint">使用已配置账号，可指定其中某个账号</span></div>
+          <div class="field-row">
+            <select id="t-platform" style="width:118px">
+              <option value="qq">QQ音乐</option><option value="netease">网易云音乐</option><option value="kugou">酷狗音乐</option>
+            </select>
+            <select id="t-account" style="width:148px"><option value="">默认账号</option></select>
+            <input id="t-keyword" class="grow" placeholder="输入歌曲名 / 歌手，回车搜索" maxlength="80">
+            <button class="btn primary" id="t-search">搜索</button>
+          </div>
+          <div class="msg" id="t-msg"></div>
+          <div class="result-list" id="t-list"></div>
+          <div class="pick-box hide" id="t-pick"></div>
+        </div>
+
+      </section>
+
+      <section class="view" data-view="docs">
+        <div class="page-head">
+          <div><h2>文档</h2><p>免登录公开接口 · 默认仅本机可调用</p></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>对外接口</h3></div>
+
+          <div class="ep">
+            <div class="ep-top"><span class="method">GET</span><code id="ep-search"></code><button class="btn sm" data-copy="ep-search">复制</button></div>
+            <div class="ep-name">搜索歌曲</div>
+            <p>按关键词搜索，返回带 <b>seq</b> 的列表和 <b>sessionId</b>；accountId 可指定账号。</p>
+          </div>
+          <div class="ep">
+            <div class="ep-top"><span class="method">GET</span><code id="ep-pick"></code><button class="btn sm" data-copy="ep-pick">复制</button></div>
+            <div class="ep-name">取播放直链</div>
+            <p>用 <b>sessionId + seq</b> 取直链、音质和元数据；也可直接传 platform + id。</p>
+          </div>
+          <div class="ep">
+            <div class="ep-top"><span class="method">GET</span><code id="ep-platforms"></code><button class="btn sm" data-copy="ep-platforms">复制</button></div>
+            <div class="ep-name">平台概览</div>
+            <p>三个平台的上游地址、账号数和默认账号。</p>
+          </div>
+          <div class="ep">
+            <div class="ep-top"><span class="method">GET</span><code id="ep-health"></code><button class="btn sm" data-copy="ep-health">复制</button></div>
+            <div class="ep-name">健康检查</div>
+            <p>服务运行状态。</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>访问控制</h3></div>
+          <div class="ac-row">
+            <label for="listen-address">监听地址</label>
+            <input id="listen-address" class="input" type="text" spellcheck="false" autocomplete="off" placeholder="127.0.0.1">
+            <span class="hint" id="listen-hint"></span>
+          </div>
+          <div class="ac-row ac-wl" id="wl-row">
+            <label>IP 白名单 <span class="hint" id="wl-tag">仅 0.0.0.0 时生效</span></label>
+            <div class="wl-box" id="wl-box"></div>
+            <div class="wl-add">
+              <input id="wl-input" class="input" type="text" spellcheck="false" autocomplete="off" placeholder="输入 IP 后回车添加">
+              <button class="btn sm" type="button" id="wl-add-btn">添加</button>
+            </div>
+            <div class="hint" id="wl-desc">留空 = 允许所有 IP；填写 = 仅名单内 IP</div>
+          </div>
+          <div class="ac-foot">
+            <span class="msg" id="ac-msg"></span>
+            <button class="btn sm primary" type="button" id="ac-save">保存访问控制</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="scrim" id="scrim"></div>
+
+<script>
+(function(){
+  'use strict';
+  var PLUGIN_ID = window.__KAKAKE_PLUGIN_ID__ || 'kz-plugin-music-front';
+  var ADMIN = '/api/Plugin/ext/' + PLUGIN_ID;
+  var PUBLIC = '/plugin/' + PLUGIN_ID + '/api';
+  var PFS = [
+    {id:'qq', name:'QQ音乐', repo:'yakult-green-tea/qq-music-api', desc:'扫码或 sealed token 登录，取高音质播放直链。', channels:true, cred:'token'},
+    {id:'netease', name:'网易云音乐', repo:'NeteaseCloudMusicApiEnhanced/api-enhanced', desc:'增强版接口，解灰与无损支持最好，凭证为登录后 cookie。', channels:false, cred:'cookie'},
+    {id:'kugou', name:'酷狗音乐', repo:'MakcRe/KuGouMusicApi', desc:'路由按文件名映射，凭证为 token + userid，走 Authorization 头。', channels:false, cred:'token + userId'}
+  ];
+  var SETTINGS = null;
+  var renaming = null;
+  var qrTimers = {};
+  var testSession = '';
+
+  function $(id){ return document.getElementById(id); }
+
+  // ── 侧栏折叠 / 手机抽屉 ──
+  var body = document.body;
+  var store = {
+    get:function(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+    set:function(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+  };
+  function isMobile(){ return window.matchMedia('(max-width:760px)').matches; }
+  function syncCollapse(){
+    var remembered = store.get('mf-side-collapsed') === '1';
+    var collapsed = remembered && !isMobile();
+    body.classList.toggle('side-collapsed', collapsed);
+    $('menu').title = isMobile() ? '打开导航' : (collapsed ? '展开侧边栏' : '折叠侧边栏');
+  }
+  syncCollapse();
+  // 桌面：顶栏三条杠切换侧栏折叠（状态记住）；手机：三条杠打开抽屉，点遮罩 / 选项关闭
+  $('menu').onclick = function(){
+    if (isMobile()) { body.classList.add('nav-open'); return; }
+    var next = !body.classList.contains('side-collapsed');
+    store.set('mf-side-collapsed', next ? '1' : '0');
+    body.classList.toggle('side-collapsed', next);
+    syncCollapse();
+  };
+  $('scrim').onclick = function(){ body.classList.remove('nav-open'); };
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') body.classList.remove('nav-open'); });
+  window.addEventListener('resize', syncCollapse);
+
+  function esc(s){
+    if (s==null) return '';
+    var v = s;
+    if (typeof v === 'object') { try { v = JSON.stringify(v); } catch(_) { v = String(v); } }
+    return String(v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
+  }
+  function dur(sec){ sec=Number(sec)||0; return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(Math.floor(sec%60)).padStart(2,'0'); }
+  // 播放器时间：秒只保留两位小数，避免长小数撑动布局
+  function ptime(sec){
+    sec=Math.max(0,Number(sec)||0);
+    var m=Math.floor(sec/60), s=sec-m*60;
+    if (s >= 59.995) { m++; s=0; }
+    return String(m).padStart(2,'0')+':'+s.toFixed(2).padStart(5,'0');
+  }
+  function time(ts){ if(!ts) return '—'; var d=new Date(ts); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+  async function j(url, opts){
+    var r = await fetch(url, opts);
+    var t = await r.text();
+    try { return JSON.parse(t); } catch(e){ return {code:-9, message:'响应不是 JSON：'+t.slice(0,120)}; }
+  }
+  function post(path, data){
+    return j(ADMIN+path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data||{})});
+  }
+  function toast(msg, bad){
+    var pill = $('tools-pill');
+    pill.querySelector('span').textContent = msg;
+    pill.classList.toggle('on', !bad);
+    setTimeout(function(){ pill.querySelector('span').textContent='就绪'; pill.classList.remove('on'); }, 3200);
+  }
+
+  // ── 生成三个平台页面 ──
+  function platformView(pf){
+    var channelField = pf.channels ?
+      '<label>登录通道<select id="qr-channel-'+pf.id+'"><option value="qq">QQ</option><option value="wechat">微信</option><option value="qqmusic">QQ音乐</option></select></label>' : '';
+    var manualFields =
+      (pf.id==='netease' ?
+        '<label>Cookie（主要）<input id="m-cookie-'+pf.id+'" placeholder="MUSIC_U=...; __csrf=..."></label>'+
+        '<label>Token（可选）<input id="m-token-'+pf.id+'" placeholder="登录 token"></label>' :
+        '<label>Token（主要）<input id="m-token-'+pf.id+'" placeholder="登录 token"></label>'+
+        '<label>Cookie（可选）<input id="m-cookie-'+pf.id+'" placeholder="兼容 cookie 模式的上游"></label>') +
+      (pf.id==='kugou' ? '<label>UserId<input id="m-userid-'+pf.id+'" placeholder="userid"></label>' : '') +
+      '<label>备注名<input id="m-name-'+pf.id+'" placeholder="例如：主号"></label>';
+    return ''+
+    '<section class="view'+(pf.id==='qq'?' on':'')+'" data-view="'+pf.id+'">'+
+      '<div class="page-head"><div><h2>'+pf.name+'</h2><p>'+pf.desc+'</p></div>'+
+      '<span class="pill" id="pill-'+pf.id+'"><i></i><span>未加载</span></span></div>'+
+
+      '<div class="panel">'+
+        '<div class="panel-head"><h3>上游服务</h3><span class="hint mono">'+pf.repo+'</span></div>'+
+        '<div class="builtin-note" id="builtin-'+pf.id+'"><i></i><span>内置服务状态检测中…</span></div>'+
+        '<div class="field-row"><label>服务地址</label><input class="grow mono" id="base-'+pf.id+'" placeholder="http://127.0.0.1:9500/'+pf.id+'">'+
+        '<button class="btn" data-act="save-base" data-p="'+pf.id+'">保存地址</button></div>'+
+        '<div class="msg" id="base-msg-'+pf.id+'"></div>'+
+      '</div>'+
+
+      '<div class="panel">'+
+        '<div class="panel-head"><h3>账号管理</h3><span class="hint" id="count-'+pf.id+'"></span></div>'+
+        '<p class="doc-lead">搜索/取链会优先使用<span style="color:#a86b00">会员账号</span>（同级按默认、添加先后），用不了时自动换下一个；标「优先使用」的是当前首选。</p>'+
+        '<div class="toolbar">'+
+          '<button class="btn primary" data-act="qr-toggle" data-p="'+pf.id+'">扫码登录</button>'+
+          '<button class="btn" data-act="manual-toggle" data-p="'+pf.id+'">手动添加</button>'+
+        '</div>'+
+
+        '<div class="subpanel hide" id="qr-'+pf.id+'">'+
+          '<h4>扫码添加账号</h4>'+
+          '<div class="fields"><label>账号备注（可选）<input id="qr-name-'+pf.id+'" placeholder="例如：手机小号"></label>'+channelField+'</div>'+
+          '<button class="btn primary" data-act="qr-start" data-p="'+pf.id+'">获取二维码</button>'+
+          '<div class="qr-result" id="qr-img-'+pf.id+'"></div>'+
+          '<div class="msg" id="qr-msg-'+pf.id+'"></div>'+
+        '</div>'+
+
+        '<div class="subpanel hide" id="manual-'+pf.id+'">'+
+          '<h4>手动添加账号 · 凭证字段：'+pf.cred+'</h4>'+
+          '<div class="fields">'+manualFields+'</div>'+
+          '<button class="btn primary" data-act="manual-add" data-p="'+pf.id+'">添加账号</button>'+
+          '<div class="msg" id="manual-msg-'+pf.id+'"></div>'+
+        '</div>'+
+
+        '<div class="accounts" id="accs-'+pf.id+'"></div>'+
+      '</div>'+
+    '</section>';
+  }
+  $('platform-views').innerHTML = PFS.map(platformView).join('');
+
+  function pfData(p){ return (SETTINGS.platforms||[]).filter(function(x){return x.platform===p;})[0] || {accounts:[]}; }
+  function pfMeta(p){ return PFS.filter(function(x){return x.id===p;})[0]; }
+
+  function accountCard(p, a, preferredId){
+    var nick = a.profile && a.profile.nickname ? String(a.profile.nickname) : '';
+    var avatar = a.profile && a.profile.avatar ? String(a.profile.avatar) : '';
+    // 头像：有则显示圆形头像，没有则不占位
+    var avatarHtml = /^(https?:|data:image)/.test(avatar)
+      ? '<img class="acc-avatar" src="'+esc(avatar)+'" alt="" referrerpolicy="no-referrer">' : '';
+    // 名字排版：备注名字 - 账号名字（昵称）；没有昵称时只显示备注名
+    var nameHtml = esc(a.name) + (nick && nick!==a.name
+      ? '<span class="acc-dash">-</span><span class="acc-nick">'+esc(nick)+'</span>' : '');
+    var vip = a.profile && a.profile.vip ? '<span class="vip">会员</span>' : '';
+    var pri = a.id===preferredId ? ' <span class="tag pri">优先使用</span>' : '';
+    var toks = (a.hasToken ? '<span>token '+esc(a.tokenMask)+'</span>' : '') + (a.hasCookie ? '<span>cookie '+esc(a.cookieMask)+'</span>' : '');
+    var edit = renaming && renaming.p===p && renaming.id===a.id;
+    return '<div class="acc'+(a.enabled?'':' off')+'">'+
+      '<div class="acc-top">'+avatarHtml+'<div class="acc-name">'+(edit ? '重命名账号' : nameHtml)+
+        (!edit&&a.isDefault?' <span class="tag">默认</span>':'')+pri+'</div>'+
+        '<span class="state'+(a.enabled?' on':'')+'">'+(a.enabled?'启用中':'已停用')+'</span></div>'+
+      (edit ? '<div class="inline-edit"><input id="rn-'+a.id+'" value="'+esc(a.name)+'" maxlength="40">'+
+        '<button class="btn sm primary" data-act="rename-save" data-p="'+p+'" data-id="'+a.id+'">保存</button>'+
+        '<button class="btn sm" data-act="rename-cancel">取消</button></div>' : '')+
+      '<div class="acc-meta">'+vip+toks+(a.userId?'<span>userId '+esc(a.userId)+'</span>':'')+'</div>'+
+      '<div class="acc-foot"><span class="time">更新 '+time(a.updatedAt)+'</span><div class="acts">'+
+        (!a.isDefault&&a.enabled?'<button class="link" data-act="default" data-p="'+p+'" data-id="'+a.id+'">设为默认</button>':'')+
+        '<button class="link" data-act="refresh" data-p="'+p+'" data-id="'+a.id+'">刷新凭证</button>'+
+        '<button class="link" data-act="status" data-p="'+p+'" data-id="'+a.id+'">检测登录</button>'+
+        '<button class="link" data-act="toggle" data-p="'+p+'" data-id="'+a.id+'">'+(a.enabled?'停用':'启用')+'</button>'+
+        '<button class="link" data-act="rename" data-p="'+p+'" data-id="'+a.id+'">重命名</button>'+
+        '<button class="link danger" data-act="remove" data-p="'+p+'" data-id="'+a.id+'">删除</button>'+
+      '</div></div><div class="probe hide" id="probe-'+a.id+'"></div></div>';
+  }
+
+  function renderPlatform(p){
+    var d = pfData(p);
+    var input = $('base-'+p);
+    if (input && document.activeElement !== input) input.value = d.base || '';
+    var list = d.accounts || [];
+    $('count-'+p).textContent = list.length + ' 个账号';
+    var pill = $('pill-'+p), active = list.filter(function(a){return a.enabled&&(a.hasToken||a.hasCookie);}).length;
+    pill.classList.toggle('on', active>0);
+    pill.querySelector('span').textContent = active ? (active+' 个可用') : '未登录';
+    $('accs-'+p).innerHTML = list.length ? list.map(function(a){return accountCard(p,a,d.preferredAccountId);}).join('') :
+      '<div class="empty">还没有账号。用上方「扫码登录」或「手动添加」新增，可添加多个并指定默认账号。</div>';
+    var badge = document.querySelector('[data-badge="'+p+'"]');
+    if (badge) badge.textContent = list.length;
+  }
+
+  function renderAll(){
+    if (!SETTINGS) return;
+    PFS.forEach(function(pf){ renderPlatform(pf.id); });
+    var pb = (SETTINGS.api && SETTINGS.api.publicBase) || PUBLIC;
+    $('ep-search').textContent = 'GET '+pb+'/search?platform=qq&keyword=周杰伦&page=1&limit=20';
+    $('ep-pick').textContent = 'GET '+pb+'/pick?sessionId=<上一步返回>&seq=1&quality=320';
+    $('ep-platforms').textContent = 'GET '+pb+'/platforms';
+    $('ep-health').textContent = 'GET '+pb+'/health';
+    renderAccess();
+    renderAccountOptions();
+  }
+
+  // ── 访问控制（文档页）──
+  var wlDraft = []; // 当前编辑中的白名单（未保存）
+  function ipValid(s){
+    s=String(s||'').trim(); if(!s) return false;
+    if(s.indexOf(':')>=0) return /^[0-9a-f:]+$/i.test(s);
+    var p=s.split('.'); return p.length===4 && p.every(function(x){return /^\d{1,3}$/.test(x)&&+x<=255;});
+  }
+  function renderAccess(){
+    if(!SETTINGS) return;
+    var st=SETTINGS.settings||{};
+    var addr=st.listenAddress||'127.0.0.1';
+    var input=$('listen-address');
+    if(document.activeElement!==input) input.value=addr;
+    // 草稿始终跟随服务端配置（load 只发生在初始化与保存后，不会打断用户编辑）
+    wlDraft=(Array.isArray(st.ipWhitelist)?st.ipWhitelist:[]).slice();
+    syncWlEnabled(addr);
+    renderWlChips();
+  }
+  // 仅按监听地址切换白名单可配置状态，不动草稿
+  function syncWlEnabled(addr){
+    var local=addr!=='0.0.0.0';
+    $('listen-hint').textContent=local?'仅本设备可访问（默认）':'所有网卡可访问，受下方白名单约束';
+    $('wl-row').classList.toggle('is-off', local);
+    $('wl-tag').textContent=local?'仅 0.0.0.0 时可配置':'已启用';
+  }
+  function renderWlChips(){
+    var box=$('wl-box');
+    if(!wlDraft.length){ box.innerHTML='<span class="wl-empty">未添加（允许所有 IP）</span>'; return; }
+    box.innerHTML=wlDraft.map(function(ip,i){
+      return '<span class="wl-chip">'+esc(ip)+'<button type="button" data-wl-rm="'+i+'" title="移除">×</button></span>';
+    }).join('');
+  }
+  function addWl(){
+    var el=$('wl-input'), v=el.value.trim();
+    if(!v){ toast('请输入 IP', true); return; }
+    if(!ipValid(v)){ toast('IP 格式不正确', true); return; }
+    if(wlDraft.indexOf(v)>=0){ toast('该 IP 已在列表中', true); return; }
+    wlDraft.push(v); el.value=''; renderWlChips();
+  }
+  async function saveAccess(){
+    var addr=$('listen-address').value.trim()||'127.0.0.1';
+    if(addr!=='127.0.0.1'&&addr!=='0.0.0.0'){ toast('监听地址只能是 127.0.0.1 或 0.0.0.0', true); return; }
+    var m=$('ac-msg'); m.className='msg'; m.textContent='保存中…';
+    try{
+      var r=await post('/settings',{listenAddress:addr,ipWhitelist:addr==='0.0.0.0'?wlDraft:[]});
+      if(r.code!==0){ m.textContent=r.message||'保存失败'; return; }
+      await load();
+      m.className='msg ok'; m.textContent='已保存。'+(addr==='127.0.0.1'?'仅本设备可访问。':(wlDraft.length?'仅白名单 IP 可访问。':'所有 IP 可访问。'));
+    }catch(e){ m.className='msg'; m.textContent='保存失败：'+e.message; }
+  }
+
+  async function load(){
+    try {
+      var r = await j(ADMIN+'/settings');
+      if (r.code!==0) { toast(r.message||'配置读取失败', true); return; }
+      SETTINGS = r.data; renderAll();
+    } catch(e){ toast('无法读取配置：'+e.message, true); }
+    loadBuiltinStatus();
+  }
+
+  var builtinRetryTimer = null;
+  var BUILTIN_RETRY_MAX = 10;
+  async function loadBuiltinStatus(retryLeft){
+    if (retryLeft === undefined) retryLeft = BUILTIN_RETRY_MAX;
+    if (builtinRetryTimer) { clearTimeout(builtinRetryTimer); builtinRetryTimer = null; }
+    var needRetry = false;
+    try {
+      var r = await j(PUBLIC+'/health');
+      var svc = (r.data && r.data.builtinServices) || {};
+      PFS.forEach(function(pf){
+        var el = $('builtin-'+pf.id); if(!el) return;
+        var info = svc[pf.id];
+        var base = (SETTINGS.settings && SETTINGS.settings.bases && SETTINGS.settings.bases[pf.id]) || '';
+        var isLocal = /^https?:\/\/(127\.0\.0\.1|localhost):9500/i.test(base);
+        if (!isLocal) {
+          el.className='builtin-note off';
+          el.querySelector('span').textContent='当前使用外部地址：'+base+'（该平台不走内置服务）';
+        } else if (info && info.managed) {
+          el.className='builtin-note ready';
+          el.querySelector('span').textContent='统一进程已启动：单端口 '+info.port+'，三平台各占一个独立 Worker，崩溃自动重启 — 开箱即用';
+        } else {
+          needRetry = true;
+          el.className='builtin-note';
+          el.querySelector('span').textContent = retryLeft > 0
+            ? '内置服务启动中，正在检测…（统一端口 9500）'
+            : '内置服务随插件分发，插件加载时自动启动（统一端口 9500）';
+        }
+      });
+    } catch(e){ needRetry = true; }
+    // 插件加载与内置服务就绪之间有约数百毫秒窗口，探测扑空后自动重试，避免页面一直停在"未就绪"。
+    if (needRetry && retryLeft > 0) {
+      builtinRetryTimer = setTimeout(function(){ loadBuiltinStatus(retryLeft - 1); }, 1000);
+    }
+  }
+
+  function renderAccountOptions(){
+    var p = $('t-platform').value, sel = $('t-account'), cur = sel.value;
+    var list = pfData(p).accounts || [];
+    sel.innerHTML = '<option value="">默认账号</option>'+list.map(function(a){
+      return '<option value="'+esc(a.id)+'">'+(a.isDefault?'★ ':'')+esc(a.name)+'</option>';
+    }).join('');
+    sel.value = cur && list.some(function(a){return a.id===cur;}) ? cur : '';
+  }
+
+  // ── 导航 ──
+  var TITLES = {qq:'QQ音乐',netease:'网易云音乐',kugou:'酷狗音乐',tools:'搜索',docs:'文档'};
+  function switchView(v){
+    body.classList.remove('nav-open');
+    document.querySelectorAll('.nav-item').forEach(function(b){ b.classList.toggle('on', b.dataset.view===v); });
+    document.querySelectorAll('.view').forEach(function(s){ s.classList.toggle('on', s.dataset.view===v); });
+    $('crumb').textContent = TITLES[v] || v;
+    if (v==='tools') renderAccountOptions();
+  }
+  document.querySelectorAll('.nav-item').forEach(function(b){ b.onclick=function(){ switchView(b.dataset.view); }; });
+
+  // 访问控制交互
+  $('listen-address').addEventListener('input',function(){ syncWlEnabled(this.value.trim()||'127.0.0.1'); });
+  $('wl-add-btn').onclick=addWl;
+  $('wl-input').addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); addWl(); } });
+  $('wl-box').addEventListener('click',function(e){
+    var b=e.target.closest('[data-wl-rm]'); if(!b) return;
+    wlDraft.splice(parseInt(b.dataset.wlRm,10),1); renderWlChips();
+  });
+  $('ac-save').onclick=saveAccess;
+
+  // ── 平台操作（事件委托）──
+  document.addEventListener('click', async function(e){
+    var el = e.target.closest('[data-act]');
+    if (!el) return;
+    var act = el.dataset.act, p = el.dataset.p, id = el.dataset.id;
+    var msg = function(){ return $('qr-msg-'+p); };
+
+    if (act==='save-base'){
+      var box = $('base-msg-'+p); box.className='msg'; box.textContent='保存中…';
+      var bodies = {}; PFS.forEach(function(x){ bodies[x.id] = $('base-'+x.id).value.trim(); });
+      var r = await post('/settings', {bases:bodies});
+      box.textContent = r.code===0?'已保存':(r.message||'保存失败');
+      box.className = r.code===0?'msg ok':'msg';
+      if (r.code===0) await load();
+      return;
+    }
+    if (act==='qr-toggle' || act==='manual-toggle'){
+      var isQr = act==='qr-toggle';
+      var panel = $((isQr?'qr-':'manual-')+p);
+      panel.classList.toggle('hide');
+      if (!panel.classList.contains('hide')) panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+      return;
+    }
+    if (act==='qr-start'){
+      var m = msg(); m.className='msg'; m.textContent='获取二维码…';
+      var box = $('qr-img-'+p); box.textContent='';
+      if (qrTimers[p]) { clearInterval(qrTimers[p].t); delete qrTimers[p]; }
+      try {
+        var r = await post('/accounts/qr/start', {platform:p, name:$('qr-name-'+p).value.trim(), channel:($('qr-channel-'+p)||{}).value||'qq'});
+        if (r.code!==0){ m.textContent=r.message||'发起失败'; return; }
+        if (r.data.qrimg && /^(data:image|https?:)/.test(r.data.qrimg)) box.innerHTML='<img src="'+esc(r.data.qrimg)+'" alt="登录二维码">';
+        else box.innerHTML='<div class="qr-txt">'+esc(r.data.qrimg||'上游未返回二维码图片，请用对应 App 扫码接口')+'</div>';
+        m.textContent='请用手机扫码，正在轮询…';
+        var ticks=0;
+        var t=setInterval(async function(){
+          try {
+            var c=await post('/accounts/qr/check',{platform:p,key:r.data.key,channel:($('qr-channel-'+p)||{}).value||'qq'});
+            if (c.code===0 && c.data.status==='ok'){
+              clearInterval(t); delete qrTimers[p];
+              m.className='msg ok'; m.textContent='登录成功：'+((c.data.account||{}).name||'账号已添加');
+              $('qr-'+p).classList.add('hide'); box.textContent='';
+              await load(); toast('账号已添加'); return;
+            }
+            if (c.code===0 && c.data.status==='scanned') m.textContent='已扫描，请在手机确认…';
+            else if (c.code===0 && c.data.status==='expired'){ clearInterval(t); delete qrTimers[p]; m.textContent='二维码已过期，请重新获取'; }
+            if (++ticks>100){ clearInterval(t); delete qrTimers[p]; m.textContent='轮询超时，请重试'; }
+          } catch(err){ /* 网络抖动，继续轮询 */ }
+        },1500);
+        qrTimers[p]={t:t};
+      } catch(err){ m.textContent='失败：'+err.message; }
+      return;
+    }
+    if (act==='manual-add'){
+      var mm=$('manual-msg-'+p); mm.className='msg'; mm.textContent='保存中…';
+      var body={platform:p, name:$('m-name-'+p).value.trim()};
+      var tk=$('m-token-'+p), ck=$('m-cookie-'+p);
+      if (tk && tk.value.trim()) body.token=tk.value.trim();
+      if (ck && ck.value.trim()) body.cookie=ck.value.trim();
+      if (p==='kugou') body.userId=$('m-userid-'+p).value.trim();
+      var r=await post('/accounts/manual',body);
+      mm.textContent=r.code===0?'账号已添加':(r.message||'添加失败');
+      mm.className=r.code===0?'msg ok':'msg';
+      if (r.code===0){
+        ['m-token-'+p,'m-cookie-'+p,'m-userid-'+p,'m-name-'+p].forEach(function(k){ var x=$(k); if(x) x.value=''; });
+        $('manual-'+p).classList.add('hide'); await load(); toast('账号已添加');
+      }
+      return;
+    }
+    if (act==='rename'){ renaming={p:p,id:id}; renderPlatform(p); return; }
+    if (act==='rename-cancel'){ renaming=null; PFS.forEach(function(x){renderPlatform(x.id);}); return; }
+    if (act==='rename-save'){
+      var v=$('rn-'+id).value.trim();
+      var r=await post('/accounts/update',{platform:p,id:id,name:v});
+      if (r.code!==0){ toast(r.message||'重命名失败',true); return; }
+      renaming=null; await load(); toast('已重命名'); return;
+    }
+    if (act==='default'){
+      var r=await post('/accounts/default',{platform:p,id:id});
+      if(r.code===0){ await load(); toast('已设为默认账号'); } else toast(r.message||'操作失败',true); return;
+    }
+    if (act==='toggle'){
+      var a=(pfData(p).accounts||[]).filter(function(x){return x.id===id;})[0];
+      if(!a) return;
+      var r=await post('/accounts/update',{platform:p,id:id,enabled:a.enabled?'false':'true'});
+      if(r.code===0){ await load(); toast(a.enabled?'账号已停用':'账号已启用'); } else toast(r.message||'操作失败',true); return;
+    }
+    if (act==='remove'){
+      if(!confirm('确定删除这个账号？本地凭证也会一并移除。')) return;
+      var r=await post('/accounts/remove',{platform:p,id:id});
+      if(r.code===0){ await load(); toast('账号已删除'); } else toast(r.message||'删除失败',true); return;
+    }
+    if (act==='refresh'){
+      var btn=el; btn.disabled=true; var old=btn.textContent; btn.textContent='刷新中…';
+      var r=await post('/accounts/refresh',{platform:p,id:id});
+      btn.disabled=false; btn.textContent=old;
+      if(r.code===0){ await load(); toast('凭证已刷新'); } else toast(r.message||'刷新失败',true); return;
+    }
+    if (act==='status'){
+      var box=$('probe-'+id); box.classList.remove('hide'); box.textContent='正在向 '+pfMeta(p).name+' 上游查询登录资料…';
+      var r=await j(ADMIN+'/accounts/status?platform='+encodeURIComponent(p)+'&id='+encodeURIComponent(id));
+      if(r.code!==0){ box.textContent='检测失败：'+(r.message||''); return; }
+      if(r.data.found){
+        var pr=r.data.profile||{};
+        box.innerHTML='<b>登录配置可获取</b> · '+(pr.nickname?'昵称：'+esc(pr.nickname):'未返回昵称')+
+          (pr.vip?' · 会员':'')+(pr.userId?' · userId '+esc(pr.userId):'')+'<br><span style="color:#839186">'+esc(r.data.detail)+'</span>';
+        await load();
+      } else {
+        box.innerHTML='<b>未探测到登录资料</b><br><span style="color:#839186">'+esc(r.data.detail)+'</span>';
+      }
+      return;
+    }
+  });
+
+  // ── 搜索测试 ──
+  document.addEventListener('change', function(e){ if(e.target.id==='t-platform') renderAccountOptions(); });
+  async function doSearch(){
+    pickToken++;
+    var p=$('t-platform').value, kw=$('t-keyword').value.trim(), acc=$('t-account').value;
+    if(!kw){ $('t-msg').className='msg'; $('t-msg').textContent='请输入关键词'; return; }
+    var btn=$('t-search'); btn.disabled=true;
+    var m=$('t-msg'); m.className='msg'; m.textContent='搜索中…';
+    $('t-list').textContent=''; $('t-pick').classList.add('hide');
+    try{
+      var url=PUBLIC+'/search?platform='+encodeURIComponent(p)+'&keyword='+encodeURIComponent(kw)+'&page=1&limit=20'+(acc?'&accountId='+encodeURIComponent(acc):'');
+      var r=await j(url);
+      if(r.code!==0){ m.textContent=r.message||'搜索失败'; return; }
+      testSession=r.data.sessionId;
+      m.className='msg ok'; m.textContent='共 '+r.data.total+' 条 / 返回 '+r.data.list.length+' 条'+(r.data.accountName?' · 账号：'+r.data.accountName:'')+'。点一首取直链。';
+      $('t-list').innerHTML=r.data.list.map(function(s){
+        return '<div class="song" data-seq="'+s.seq+'" data-title="'+esc(s.title)+'">'+
+          '<span class="seq">'+s.seq+'</span><div class="info"><div class="t">'+esc(s.title)+'</div>'+
+          '<div class="s">'+esc([s.artist,s.album].filter(Boolean).join(' · '))+'</div></div>'+
+          '<span class="state"></span><span class="d">'+dur(s.duration)+'</span></div>';
+      }).join('');
+      if(!r.data.list.length) m.className='msg', m.textContent='没有找到结果，或上游未登录 / 被限制';
+    }catch(e){ m.className='msg'; m.textContent='请求失败：'+e.message; }
+    finally{ btn.disabled=false; }
+  }
+  $('t-search').onclick=doSearch;
+  $('t-keyword').addEventListener('keydown',function(e){ if(e.key==='Enter') doSearch(); });
+  // 取直链的状态描边：黄=获取中 / 绿=成功 / 红=失败
+  var pickToken = 0;
+  function setSongState(row, state){
+    if(!row) return;
+    row.classList.remove('sel-pending','sel-ok','sel-fail');
+    if(state) row.classList.add('sel-'+state);
+  }
+  function playerHtml(d){
+    return '<div class="player">'+
+      '<div class="p-name">'+esc(d.title)+(d.artist?' — '+esc(d.artist):'')+'</div>'+
+      '<div class="p-main">'+
+        '<button class="p-btn" type="button" title="播放 / 暂停">▶</button>'+
+        '<span class="p-time p-cur">00:00.00</span>'+
+        '<div class="p-seek" role="slider" tabindex="0" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">'+
+          '<div class="p-seek-track"><div class="p-seek-buf"></div><div class="p-seek-fill"></div><div class="p-seek-thumb"></div></div>'+
+          '<div class="p-seek-tip">00:00.00</div>'+
+        '</div>'+
+        '<span class="p-time p-dur">00:00.00</span>'+
+        '<span class="p-vol"><span>♪</span><input class="p-vol-range" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="音量"></span>'+
+      '</div>'+
+      '<div class="p-err hide"></div>'+
+      '<audio class="p-audio" preload="metadata" src="'+esc(d.url)+'"></audio>'+
+    '</div>';
+  }
+  function bindPlayer(root, row){
+    var audio=root.querySelector('.p-audio'), btn=root.querySelector('.p-btn');
+    var seek=root.querySelector('.p-seek'), track=seek.querySelector('.p-seek-track');
+    var fill=seek.querySelector('.p-seek-fill'), buf=seek.querySelector('.p-seek-buf');
+    var thumb=seek.querySelector('.p-seek-thumb'), tip=seek.querySelector('.p-seek-tip');
+    var cur=root.querySelector('.p-cur'), durEl=root.querySelector('.p-dur');
+    var vol=root.querySelector('.p-vol-range'), err=root.querySelector('.p-err');
+    var seeking=false, pendingRatio=0;
+    audio.volume=parseFloat(vol.value)||0.8;
+    // thumb 中心严格按百分比对齐轨道两端：0% 贴最左，100% 贴最右，不再有原生滑块的半宽偏移
+    function paint(ratio){
+      var r=Math.max(0,Math.min(1,ratio)), p=(r*100).toFixed(3)+'%';
+      fill.style.width=p; thumb.style.left=p;
+      seek.setAttribute('aria-valuenow',String(Math.round(r*100)));
+    }
+    function ratioAt(clientX){
+      var b=track.getBoundingClientRect();
+      return b.width>0 ? Math.max(0,Math.min(1,(clientX-b.left)/b.width)) : 0;
+    }
+    function showTip(ratio){ tip.style.left=(ratio*100).toFixed(3)+'%'; tip.textContent=ptime(ratio*(audio.duration||0)); }
+    // 拖动期间只更新界面预览，松手才写 currentTime：避免连续 Range 请求造成卡顿
+    function preview(ratio){
+      pendingRatio=ratio;
+      cur.textContent=ptime(ratio*(audio.duration||0));
+      paint(ratio); showTip(ratio);
+    }
+    function commit(){
+      if(!seeking) return;
+      seeking=false; seek.classList.remove('dragging');
+      if(audio.duration>0){ try{ audio.currentTime=pendingRatio*audio.duration; }catch(_){} }
+      cur.textContent=ptime(audio.currentTime||0);
+      paint(audio.duration>0?audio.currentTime/audio.duration:0);
+    }
+    function updateBuf(){
+      if(!audio.buffered||!audio.buffered.length||!(audio.duration>0)) return;
+      var end=audio.buffered.end(audio.buffered.length-1);
+      buf.style.width=Math.min(100,end/audio.duration*100).toFixed(3)+'%';
+    }
+    btn.onclick=function(){
+      if(audio.paused){
+        var p=audio.play();
+        if(p && p.catch) p.catch(function(e){ err.textContent='播放失败：'+(e&&e.message||'浏览器阻止播放'); err.classList.remove('hide'); setSongState(row,'fail'); });
+      } else audio.pause();
+    };
+    audio.addEventListener('play',function(){ btn.textContent='❚❚'; setSongState(row,'ok'); });
+    audio.addEventListener('pause',function(){ btn.textContent='▶'; });
+    audio.addEventListener('ended',function(){ btn.textContent='▶'; seeking=false; seek.classList.remove('dragging'); pendingRatio=0; cur.textContent='00:00.00'; paint(0); });
+    audio.addEventListener('loadedmetadata',function(){ durEl.textContent=ptime(audio.duration); updateBuf(); paint(0); });
+    audio.addEventListener('progress',updateBuf);
+    audio.addEventListener('timeupdate',function(){
+      if(seeking) return; // 拖动时不被播放事件回拉
+      cur.textContent=ptime(audio.currentTime);
+      if(audio.duration>0){ paint(audio.currentTime/audio.duration); showTip(audio.currentTime/audio.duration); }
+    });
+    seek.addEventListener('pointerdown',function(e){
+      seeking=true; seek.classList.add('dragging');
+      try{ seek.setPointerCapture(e.pointerId); }catch(_){}
+      preview(ratioAt(e.clientX)); e.preventDefault();
+    });
+    seek.addEventListener('pointermove',function(e){
+      var r=ratioAt(e.clientX);
+      if(seeking) preview(r); else showTip(r);
+    });
+    seek.addEventListener('pointerup',function(e){ commit(); try{ seek.releasePointerCapture(e.pointerId); }catch(_){} });
+    seek.addEventListener('pointercancel',commit);
+    seek.addEventListener('lostpointercapture',commit);
+    seek.addEventListener('pointerleave',function(){ if(!seeking) showTip(audio.duration>0?audio.currentTime/audio.duration:0); });
+    seek.addEventListener('keydown',function(e){
+      if(!(audio.duration>0)) return;
+      var k=e.key, t=audio.currentTime;
+      if(k==='ArrowLeft'||k==='ArrowDown') t-=5;
+      else if(k==='ArrowRight'||k==='ArrowUp') t+=5;
+      else if(k==='Home') t=0;
+      else if(k==='End') t=audio.duration;
+      else return;
+      e.preventDefault();
+      t=Math.max(0,Math.min(audio.duration,t));
+      try{ audio.currentTime=t; }catch(_){}
+      cur.textContent=ptime(t); paint(t/audio.duration); showTip(t/audio.duration);
+    });
+    vol.addEventListener('input',function(){ audio.volume=parseFloat(vol.value); });
+    audio.addEventListener('error',function(){
+      err.textContent='音频加载失败（直链可能已过期或浏览器拦截了 http 资源），可点下方链接在新标签页打开';
+      err.classList.remove('hide'); setSongState(row,'fail');
+    });
+  }
+
+  $('t-list').addEventListener('click', async function(e){
+    var row=e.target.closest('.song'); if(!row) return;
+    // 切歌先停上一个，避免多首同时播放
+    var oldAudio=$('t-pick').querySelector('.p-audio');
+    if(oldAudio){ try{ oldAudio.pause(); }catch(_){} }
+    document.querySelectorAll('#t-list .song').forEach(function(r){ setSongState(r,''); });
+    setSongState(row,'pending');
+    var token=++pickToken;
+    var box=$('t-pick'); box.classList.remove('hide'); box.innerHTML='<div class="row2">正在取直链…</div>';
+    try{
+      var r=await j(PUBLIC+'/pick?sessionId='+encodeURIComponent(testSession)+'&seq='+row.dataset.seq+'&quality=320');
+      if(token!==pickToken) return;
+      if(r.code!==0){ setSongState(row,'fail'); box.innerHTML='<div class="row2">取直链失败：'+esc(r.message||'')+'</div>'; return; }
+      var d=r.data;
+      setSongState(row,'ok');
+      box.innerHTML='<div><b>'+esc(d.title)+'</b> <span style="color:#7f8d82">— '+esc(d.artist)+'</span></div>'+
+        '<div class="row2"><span>音质：'+esc(String(d.quality))+'</span><span>序号：'+d.seq+'</span><span>账号：'+esc(d.accountName||'默认')+'</span></div>'+
+        '<div class="row2"><a href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.url)+'</a></div>'+
+        playerHtml(d);
+      bindPlayer(box, row);
+    }catch(err){ if(token!==pickToken) return; setSongState(row,'fail'); box.innerHTML='<div class="row2">取直链失败：'+esc(err.message)+'</div>'; }
+  });
+
+  document.querySelectorAll('[data-copy]').forEach(function(b){
+    b.onclick=async function(){
+      var txt=$(b.dataset.copy).textContent.replace(/^GET /,'');
+      try{ await navigator.clipboard.writeText(txt); toast('已复制接口地址'); }
+      catch(e){
+        var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select();
+        try{ document.execCommand('copy'); toast('已复制接口地址'); }catch(_){ toast('复制失败，请手动选择',true); }
+        document.body.removeChild(ta);
+      }
+    };
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

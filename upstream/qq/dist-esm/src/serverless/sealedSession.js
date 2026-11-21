@@ -1,0 +1,146 @@
+/**
+ * Sealed sessions: the `sealed` half of the `SessionResolver` port, for runtimes that have nowhere
+ * to keep process state. The credential travels inside the token, encrypted, instead of being kept
+ * on a server that the next request might not reach.
+ *
+ * Deliberately built on `globalThis.crypto.subtle` rather than `node:crypto`, which is the mirror
+ * image of the decision in `services/auth/sessionCrypto.ts`: that module is synchronous because the
+ * repository contract Electron depends on is synchronous, and this one is async because Workers
+ * only offer Web Crypto. The envelope discipline is the same in both — one key per purpose, and the
+ * purpose bound into the ciphertext — but the serialisation differs because the constraints do: a
+ * file can hold pretty-printed JSON, a token has to survive a URL.
+ *
+ * Nothing here imports the Koa app, the config barrel or anything reaching `node:fs`.
+ */
+/** HKDF `info` values. Different `info` is what makes the three keys cryptographically unrelated. */
+export const SEALED_AUTH_PURPOSE = 'qq-music-api/v1/sealed-auth';
+export const SEALED_QR_PURPOSE = 'qq-music-api/v1/sealed-qr';
+export const DERIVED_DEVICE_PURPOSE = 'qq-music-api/v1/derived-device';
+/** Its own namespace, not a sub-key of another purpose: the key id is public, the others are not. */
+const KEY_ID_PURPOSE = 'qq-music-api/v1/sealed-kid';
+const TOKEN_PREFIX = 'qq1';
+const KEY_BITS = 256;
+const IV_BYTES = 12;
+const KID_BYTES = 6;
+/**
+ * One character per purpose in the wire format. Kept separate from the `info` strings so the token
+ * stays short while the key derivation keeps its self-describing, collision-proof names.
+ */
+const PURPOSE_TAGS = {
+    [SEALED_AUTH_PURPOSE]: 'a',
+    [SEALED_QR_PURPOSE]: 'q',
+};
+export class SealedSessionError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'SealedSessionError';
+    }
+}
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+// `Uint8Array<ArrayBuffer>` rather than the default `Uint8Array<ArrayBufferLike>` throughout:
+// Web Crypto's `BufferSource` excludes `SharedArrayBuffer`, so the narrower buffer type is what
+// lets these values be passed straight to `subtle` without a cast.
+const toBase64Url = (bytes) => {
+    let binary = '';
+    for (const byte of bytes)
+        binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const fromBase64Url = (value, field) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(value))
+        throw new SealedSessionError(`Token field ${field} is not base64url`);
+    const padded = value.replace(/-/g, '+').replace(/_/g, '/');
+    try {
+        const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+        return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    }
+    catch {
+        throw new SealedSessionError(`Token field ${field} is not base64url`);
+    }
+};
+const importSecret = (secret) => globalThis.crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, ['deriveBits']);
+/**
+ * HKDF-SHA256 with an empty salt. The salt is omitted rather than forgotten: the input keying
+ * material is a deployment secret that is already required to be high-entropy, and a per-token salt
+ * cannot be reconstructed at verification time without spending bytes in the token to carry it.
+ * Separation comes from `info`, which is exactly what `info` is for.
+ */
+export const deriveBits = async (secret, purpose, bytes) => {
+    if (!secret)
+        throw new SealedSessionError('A session secret is required');
+    const derived = await globalThis.crypto.subtle.deriveBits({
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: new Uint8Array(0),
+        info: encoder.encode(purpose),
+    }, await importSecret(secret), bytes * 8);
+    return new Uint8Array(derived);
+};
+const deriveAesKey = async (secret, purpose) => {
+    const bits = await deriveBits(secret, purpose, KEY_BITS / 8);
+    return globalThis.crypto.subtle.importKey('raw', bits, 'AES-GCM', false, ['encrypt', 'decrypt']);
+};
+/**
+ * A short, non-secret label for "which secret sealed this". Derived through its own `info`, so it
+ * reveals nothing about the encryption keys, and it is what lets a rotated deployment tell a token
+ * it can still open from one it never could.
+ */
+export const deriveKeyId = async (secret) => toBase64Url(await deriveBits(secret, KEY_ID_PURPOSE, KID_BYTES));
+const purposeTagOf = (purpose) => {
+    const tag = PURPOSE_TAGS[purpose];
+    if (!tag)
+        throw new SealedSessionError(`Unknown sealed purpose: ${purpose}`);
+    return tag;
+};
+/** AAD binds both the purpose and the key id, so neither can be swapped without failing the tag. */
+const additionalData = (purpose, kid) => encoder.encode(`${TOKEN_PREFIX}:${purpose}:${kid}`);
+export const sealToken = async (payload, purpose, secret) => {
+    const tag = purposeTagOf(purpose);
+    const kid = await deriveKeyId(secret);
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
+    const sealed = await globalThis.crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: additionalData(purpose, kid) }, await deriveAesKey(secret, purpose), encoder.encode(JSON.stringify(payload)));
+    return [TOKEN_PREFIX, tag, kid, toBase64Url(iv), toBase64Url(new Uint8Array(sealed))].join('.');
+};
+const openWithSecret = async (parts, purpose, secret) => {
+    let plaintext;
+    try {
+        plaintext = await globalThis.crypto.subtle.decrypt({ name: 'AES-GCM', iv: parts.iv, additionalData: additionalData(purpose, parts.kid) }, await deriveAesKey(secret, purpose), parts.ct);
+    }
+    catch {
+        // One message for a wrong key, a wrong purpose and a flipped byte alike. Whoever is holding
+        // the token learns only that it did not open.
+        throw new SealedSessionError('Token failed authentication');
+    }
+    try {
+        return JSON.parse(decoder.decode(plaintext));
+    }
+    catch {
+        throw new SealedSessionError('Sealed payload is not valid JSON');
+    }
+};
+export const openToken = async (token, purpose, secrets) => {
+    const expectedTag = purposeTagOf(purpose);
+    const segments = token.split('.');
+    if (segments.length !== 5 || segments[0] !== TOKEN_PREFIX)
+        throw new SealedSessionError('Token is not a sealed session');
+    const [, tag, kid, rawIv, rawCt] = segments;
+    // Checked before any key work: a QR token presented as an auth token is a shape error, not a
+    // cryptographic one, and saying so early keeps the expensive path for real candidates.
+    if (tag !== expectedTag)
+        throw new SealedSessionError('Token was sealed for another purpose');
+    const iv = fromBase64Url(rawIv, 'iv');
+    if (iv.length !== IV_BYTES)
+        throw new SealedSessionError('Token field iv has an unusable length');
+    const parts = { tag, kid, iv, ct: fromBase64Url(rawCt, 'ct') };
+    // Only the secret whose key id matches is tried. Without this a rotated deployment would pay
+    // two full derivations on every request, and a token sealed by a secret this deployment has
+    // retired would be indistinguishable from one it never issued.
+    const candidates = [secrets.current, secrets.previous].filter((secret) => typeof secret === 'string' && secret.length > 0);
+    for (const secret of candidates) {
+        if ((await deriveKeyId(secret)) !== kid)
+            continue;
+        return openWithSecret(parts, purpose, secret);
+    }
+    throw new SealedSessionError('Token was sealed by an unknown key');
+};

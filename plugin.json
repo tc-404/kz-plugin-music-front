@@ -1,0 +1,8 @@
+{
+  "name": "kz-plugin-music-front",
+  "displayName": "音乐服务前置",
+  "author": "tc-404",
+  "version": "1.1.1",
+  "entry": "index.mjs",
+  "description": "三平台音乐前置网关：统一 QQ/网易云/酷狗 的搜索列表与按序号取精准内容，对外暴露公开数据路由"
+}

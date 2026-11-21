@@ -1,0 +1,125 @@
+{
+  "name": "@yakult-green-tea/qq-music-api",
+  "version": "3.3.8",
+  "description": "非官方的 QQ 音乐 API，支持扫码登录、个人音乐库和播放链接，可以独立部署，也可以嵌入 Node.js、Electron 或 Serverless。",
+  "main": "dist/src/app.js",
+  "types": "./types/root.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/root.d.ts",
+      "require": "./dist/src/app.js",
+      "default": "./dist/src/app.js"
+    },
+    "./serverless": {
+      "types": "./dist/src/serverless/index.d.ts",
+      "import": "./dist-esm/src/serverless/index.js",
+      "require": "./dist/src/serverless/index.js",
+      "default": "./dist-esm/src/serverless/index.js"
+    },
+    "./mqtt": {
+      "types": "./dist/src/serverless/mqtt.d.ts",
+      "import": "./dist-esm/src/serverless/mqtt.js",
+      "require": "./dist/src/serverless/mqtt.js",
+      "default": "./dist-esm/src/serverless/mqtt.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "dist-esm",
+    "types",
+    "LICENSE",
+    "ATTRIBUTION.md",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "AUTO_OPEN_EXPLORER=true ts-node-dev --respawn --transpile-only src/app.ts",
+    "start": "node -r ts-node/register/transpile-only src/app.ts",
+    "start:dist": "node dist/src/app.js",
+    "build": "tsc -p tsconfig.json --noEmit --declaration",
+    "clean:dist": "node -e \"for (const d of ['dist','dist-esm']) require('node:fs').rmSync(d, { recursive: true, force: true })\"",
+    "build:js": "npm run clean:dist && tsc -p tsconfig.build.json --outDir dist && npm run build:types && npm run build:esm && node scripts/prepare-runtime-assets.js",
+    "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s -r 0",
+    "lint-staged": "lint-staged",
+    "build:local-images": "node ./scripts/build-images.js local",
+    "tag:images": "node ./scripts/build-images.js tag",
+    "push:images": "node ./scripts/build-images.js push",
+    "build:images": "npm run build:local-images",
+    "run:images": "node ./scripts/run-images.js qq-music-api-state:/app/.auth-state",
+    "lint": "biome lint ./src",
+    "check:deps": "depcruise src --config .dependency-cruiser.cjs",
+    "format": "biome format --write ./src",
+    "test": "jest",
+    "compat:check": "node scripts/compat/check.js",
+    "smoke:upstream": "node scripts/smoke/upstream.js",
+    "test:contracts": "jest --runInBand --coverage=false --setupFilesAfterEnv ./tests/helpers/offlineNetwork.cjs --runTestsByPath tests/write-safety.routes.test.ts tests/personal-cache.routes.test.ts tests/personal-cache.dispatch.test.ts tests/recommend-feed.routes.test.ts tests/guess-you-like.mode-tracks.routes.test.ts tests/song-replacement.routes.test.ts tests/folia.http-contracts.test.ts tests/folia.persistence-contracts.test.ts tests/serverless.closure-contracts.test.ts tests/package.artifact.test.ts tests/capabilities.routes.test.ts tests/recommendation.capabilities.test.ts tests/protocol.errors.test.ts tests/transport.musicu.test.ts tests/transport.hosts.test.ts tests/negative.http-contracts.test.ts tests/playlist.track-writes.routes.test.ts tests/subscriptions.routes.test.ts tests/recommend.routes.test.ts tests/daily-songs.routes.test.ts tests/daily-history.routes.test.ts tests/blacklist.read.routes.test.ts tests/blacklist.write.routes.test.ts tests/radio.recommendation.routes.test.ts tests/guess-you-like.modes.routes.test.ts tests/user.listening-rank.routes.test.ts tests/recommendation.preferences.routes.test.ts tests/recommendation.preferences.write.routes.test.ts tests/operations.music-play-controlled-hints.test.ts tests/services.qr-login.test.ts tests/operations.qr-check.test.ts tests/errors.runtime-baseline.test.ts tests/song.like.routes.test.ts tests/album.subscribe.routes.test.ts tests/search.routes.test.ts tests/folia.login-contracts.test.ts tests/folia.wiring-contracts.test.ts tests/operations.music-play-preview.test.ts tests/operations.login-channels.test.ts tests/login.refresh.routes.test.ts tests/user.vip.routes.test.ts tests/recommend-new-albums.routes.test.ts tests/recommend-toplists.routes.test.ts tests/recommend-radar.routes.test.ts tests/user-cloud.routes.test.ts tests/playlist.management.routes.test.ts tests/operations.user-playlist-detail.test.ts tests/radio.routes.test.ts tests/recommend-catalog.routes.test.ts tests/song-relations.routes.test.ts tests/operations.music-play-retry.test.ts tests/operations.music-play-quality.test.ts tests/getSingerAlbum.test.ts tests/getSingerHotsong.test.ts tests/protocol.golden-requests.test.ts tests/operations.music-play-baseline.test.ts tests/operations.encrypted-music-play.test.ts",
+    "prepare": "husky && git config core.hooksPath .husky",
+    "prepublishOnly": "npm run build:js",
+    "build:esm": "tsc -p tsconfig.esm.json --outDir dist-esm && node scripts/finalize-esm-build.js",
+    "build:types": "tsc -p tsconfig.types.json --outDir dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yakult-green-tea/qq-music-api.git"
+  },
+  "keywords": [
+    "qq-music",
+    "qqmusic",
+    "music-api",
+    "QQ音乐",
+    "koa",
+    "serverless",
+    "electron"
+  ],
+  "author": "Rain120",
+  "contributors": [
+    "yakult-green-tea",
+    "chthollyphile",
+    "lantudou"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yakult-green-tea/qq-music-api/issues"
+  },
+  "homepage": "https://github.com/yakult-green-tea/qq-music-api#readme",
+  "lint-staged": {
+    "*.ts": [
+      "biome check --write"
+    ]
+  },
+  "dependencies": {
+    "axios": "^1.19.0",
+    "koa": "^2.16.4",
+    "koa-bodyparser": "^4.2.1",
+    "koa-router": "^7.4.0",
+    "koa-static": "^5.0.0",
+    "ws": "^7.5.13",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.9",
+    "@commitlint/cli": "19.8.1",
+    "@commitlint/config-conventional": "19.8.1",
+    "@types/jest": "^30.0.0",
+    "@types/koa": "^3.0.2",
+    "@types/koa-bodyparser": "^4.3.13",
+    "@types/koa-router": "^7.4.9",
+    "@types/koa-static": "^4.0.4",
+    "@types/node": "^25.5.0",
+    "@types/supertest": "^7.2.0",
+    "conventional-changelog-cli": "^5.0.0",
+    "dependency-cruiser": "^17.4.3",
+    "husky": "^9.1.7",
+    "jest": "^30.3.0",
+    "jsdom": "^24.1.3",
+    "lint-staged": "^10.5.4",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "kz-plugin-music-front",
+  "plugin": "音乐服务前置",
+  "version": "1.1.1",
+  "debugLog": "",
+  "type": "module",
+  "main": "index.mjs",
+  "description": "QQ音乐/网易云/酷狗 三平台前置网关：统一搜索列表 + 按序号取精准直链，提供公开数据路由与 WebUI 扫码登录",
+  "author": "tc-404",
+  "license": "MIT",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.1"
+  }
+}

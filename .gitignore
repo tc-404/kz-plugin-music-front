@@ -1,0 +1,25 @@
+# 依赖（源码仓库不提交，构建时 prepare-upstream.py 会自动安装）
+node_modules/
+**/node_modules/
+
+# 构建产物（由构建脚本生成，不入库）
+kz-plugin-music-front/
+
+# 打包 zip
+*.zip
+
+# QQ 上游运行时生成的设备/会话状态（绝对不能上传，含真实凭证）
+.auth-state/
+**/.auth-state/
+
+# 插件运行时数据（凭证、密钥、会话）
+data/
+*.log
+
+# 编辑器 / 系统 junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
